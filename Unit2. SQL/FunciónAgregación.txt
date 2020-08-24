@@ -1,0 +1,463 @@
+FUNCIÓN DE AGREGACIÓN
+/* Función de agregación personalizada (fap) 
+  para contar tuplas agrupadas, incluyendo valores nulos */
+create or replace function mc_agg(estado bigint, algo anyelement) returns bigint as $$
+  select estado + 1;
+  $$ language sql;
+create aggregate micount(algo anyelement)(
+  sfunc = mc_agg,
+  stype = bigint,
+  initcond = 0
+);
+
+/* Fap para obtener el primer elemento del grupo */
+create or replace function first_agg(anyelement, anyelement) returns anyelement immutable strict parallel safe as $$
+ select $1;
+$$ language sql;
+create aggregate first(anyelement) (
+  sfunc = first_agg,
+  stype = anyelement);
+
+/* Fap para obtener el último elemento del grupo */
+create or replace function last_agg(anyelement,anyelement) returns anyelement immutable strict parallel safe as $$
+ select $2;
+$$ language sql; 
+create aggregate last(anyelement) (
+  sfunc = last_agg,
+  stype = anyelement);
+  
+/* Ejemplo de la presentación sobre la utilidad de las fap */
+with wtf as (select e.idestado,
+                    m.idmunicipio,
+                    min(fnac) min,
+                    max(fnac) max
+             from persona
+                  join domicilio d using (iddomicilio)
+                  join asentamiento a using (idasentamiento)
+                  join municipio m using (idmunicipio)
+                  join estado e using (idestado)
+             group by 1,2),
+     wtf1 as (select distinct on (m.idmunicipio) m.idmunicipio, p.nombre
+              from persona p
+                   join domicilio d using (iddomicilio)
+                   join asentamiento a using (idasentamiento)
+                   join municipio m using (idmunicipio)
+                   join wtf on (wtf.min = p.fnac and wtf.idmunicipio = m.idmunicipio)
+              order by m.idmunicipio,ap1,ap2,nombre),
+     wtf2 as (select distinct on (idmunicipio) m.idmunicipio,p.nombre
+              from persona p
+                   join domicilio d using (iddomicilio)
+                   join asentamiento a using (idasentamiento)
+                   join municipio m using (idmunicipio)
+                   join wtf on (wtf.max = p.fnac and wtf.idmunicipio = m.idmunicipio)
+              order by m.idmunicipio,ap1,ap2,nombre)
+select e.claveestado as estado,
+       m.idmunicipio as idm,
+       m.nombre as municipio,
+       wtf1.nombre as joven,
+       wtf2.nombre as vieja
+from estado e
+     join municipio m using (idestado)
+     left join wtf1 using (idmunicipio)
+     left join wtf2 on (wtf2.idmunicipio = m.idmunicipio)
+where e.nombre = 'Oaxaca'
+order by 1,2
+
+/* Versión con fap */
+select e.claveestado as estado,
+       m.idmunicipio as idm,
+       m.nombre as municipio,
+       first(p.nombre order by fnac,ap1,ap2) as joven,
+       first(p.nombre order by fnac desc,ap1,ap2) as viejo
+from estado e
+     join municipio m using (idestado)
+     join asentamiento a using (idmunicipio)
+     join domicilio d using (idasentamiento)
+     join persona p using (iddomicilio)
+where e.nombre = 'Oaxaca'
+group by 1,2,3
+order by 1,2
+
+select e.claveestado as estado,
+       m.idmunicipio as idm,
+       m.nombre as municipio,
+       first(p.nombre order by fnac,ap1,ap2) as joven,
+       last(p.nombre order by fnac,ap1,ap2) as viejo
+from estado e
+     join municipio m using (idestado)
+     join asentamiento a using (idmunicipio)
+     join domicilio d using (idasentamiento)
+     join persona p using (iddomicilio)
+--where e.nombre = 'Oaxaca'
+group by 1,2,3
+order by 1,2
+/*
+Hacer un reporte que tenga
+los datos de la tabla persona para dos personas A y B
+de la siguiente manera:
+En cada municipio
+   Si hay mas hombres que mujeres poner a la mujer más joven y al hombre más viejo
+   en otro caso al la mujer mas vieja y el hombre más joven.
+Resolver empates por apellidos alfabéticamente.*/
+--Borrador sin faps
+/*
+1. cte para determinar en qué municipios hay más hombres que mujeres.
+2. cte que de por municipio las edades mínimas y máximas de hombres y mujeres
+3.- hacer las 4 cte para hombres y mujeres más jóvenes y viejos de cada municipio
+4.- pegar todo según las condiciones requeridas
+*/
+with hmhqm as (select idmunicipio,
+                      count(case when sexo = 'm' then idpersona else null end) 
+                       > count(case when sexo = 'f' then idpersona else null end) as "sí?"
+               from asentamiento a
+                    join domicilio d using (idasentamiento)
+                    join persona p using (iddomicilio)
+               group by 1),
+     edades as (select idmunicipio,
+                       min(case when sexo = 'f' then age('2018-02-24'::date,fnac) end) as eminm,
+                       min(case when sexo = 'm' then age('2018-02-24'::date,fnac) end) as eminh,
+                       max(case when sexo = 'f' then age('2018-02-24'::date,fnac) end) as emaxm,
+                       max(case when sexo = 'm' then age('2018-02-24'::date,fnac) end) as emaxh
+                from asentamiento a
+                     join domicilio d using (idasentamiento)
+                     join persona p using (iddomicilio)
+                group by idmunicipio),
+     mmjm as (select distinct on (e.idmunicipio) e.idmunicipio,
+                     p.*
+              from persona p
+                   join domicilio d using (iddomicilio)
+                   join asentamiento a using (idasentamiento)
+                   join edades e on (a.idmunicipio = e.idmunicipio and age('2018-02-24'::date,fnac) = eminm)
+              where sexo = 'f'
+              order by e.idmunicipio,ap1,ap2,nombre),
+     mmvm as (select distinct on (e.idmunicipio) e.idmunicipio,
+                     p.*
+              from persona p
+                   join domicilio d using (iddomicilio)
+                   join asentamiento a using (idasentamiento)
+                   join edades e on (a.idmunicipio = e.idmunicipio and age('2018-02-24'::date,fnac) = emaxm)
+              where sexo = 'f'
+              order by e.idmunicipio,ap1,ap2,nombre),
+     hmjm as (select distinct on (e.idmunicipio) e.idmunicipio,
+                     p.*
+              from persona p
+                   join domicilio d using (iddomicilio)
+                   join asentamiento a using (idasentamiento)
+                   join edades e on (a.idmunicipio = e.idmunicipio and age('2018-02-24'::date,fnac) = eminh)
+              where sexo = 'm'
+              order by e.idmunicipio,ap1,ap2,nombre),
+     hmvm as (select distinct on (e.idmunicipio) e.idmunicipio,
+                     p.*
+              from persona p
+                   join domicilio d using (iddomicilio)
+                   join asentamiento a using (idasentamiento)
+                   join edades e on (a.idmunicipio = e.idmunicipio and age('2018-02-24'::date,fnac) = emaxh)
+              where sexo = 'm'
+              order by e.idmunicipio,ap1,ap2,nombre),
+     ptrue as (select * 
+               from hmhqm a
+                    join mmjm m using (idmunicipio)
+                    join hmvm h on  (h.idmunicipio = a.idmunicipio)
+               where a."sí?"),
+     pfalse as (select * 
+                from hmhqm a
+                     join mmvm m using (idmunicipio)
+                     join hmjm h on  (h.idmunicipio = a.idmunicipio)
+                where not a."sí?")
+select * 
+from ptrue
+union 
+select * from pfalse;
+
+/* Versión con procedimientos almacenados:
+  Parametrizaremos las subconsultas que generan las CTE
+  utilizadas en la consulta final*/
+
+/* Paso 1: Crear una vista como tipo de retorno para la función personasmas(char,boolean)*/
+create view munipersona as 
+ select null::bigint as idmunicipio,
+        null::bigint as idpersona,
+        null::text as nombre,
+        null::text as ap1,
+        null::text as ap2,
+        null::char(1) as sexo,
+        null::date as fnac,
+        null::bigint as iddomicilio,
+        null::int as idocupacion,
+        null::bigint as idcliente;
+
+/* Paso 2: Creamos una función que, dado el sexo y un booleano que indica el tipo (más joven viejo = true)
+           nos regrese la tabla de las personas de ese tipo y ese sexo en cada municipio*/ 
+create or replace function personasmas(v_sexo char(1),v_tipo boolean) returns setof munipersona as $$
+  with edades as (select idmunicipio,
+                         case when v_tipo then
+                           max(case when sexo = v_sexo then age('2018-02-24'::date,fnac) end)
+                         else 
+                           min(case when sexo = v_sexo then age('2018-02-24'::date,fnac) end)
+                         end  as edad
+                  from asentamiento a
+                       join domicilio d using (idasentamiento)
+                       join persona p using (iddomicilio)
+                  group by idmunicipio)
+  select distinct on (a.idmunicipio) a.idmunicipio,
+         p.*
+  from persona p
+       join domicilio d using (iddomicilio)
+       join asentamiento a using (idasentamiento)
+       join edades e on (age('2018-02-24'::date,fnac) = e.edad and e.idmunicipio = a.idmunicipio)
+  where sexo = v_sexo
+  order by a.idmunicipio,ap1,ap2,nombre;
+$$ language sql;
+   
+/* Paso 3: Definimos la consulta utilizando llamadas a la función en lugar de las CTE */
+with hmhqm as (select idmunicipio,
+                      count(case when sexo = 'm' then idpersona else null end) 
+                        > count(case when sexo = 'f' then idpersona else null end) as "sí?"
+               from asentamiento a
+                    join domicilio d using (idasentamiento)
+                    join persona p using (iddomicilio)
+               group by 1),
+     ptrue as (select * 
+               from hmhqm a
+                    join personasmas('f',false) m using (idmunicipio)
+                    join personasmas('m',true) h on (h.idmunicipio = a.idmunicipio)
+               where a."sí?"),
+     pfalse as (select * 
+                from hmhqm a
+                     join personasmas('f',true) m using (idmunicipio)
+                     join personasmas('m',false) h on (h.idmunicipio = a.idmunicipio)
+                where not a."sí?")
+select *
+from ptrue
+union 
+select * from pfalse;
+   
+
+/* Versión con fap*/
+
+/* Creamos un tipo personalizado para poder 
+   usar las funciones de agregación sobre tuplas.
+*/
+create type parejaper as (
+ a persona,
+ b persona);
+
+with omfg as (
+  select idmunicipio,
+         case when (count(case when sexo = 'm' then idpersona else null end)
+               >  count(case when sexo = 'f' then idpersona else null end)) then
+           (last(case when sexo = 'f' then
+                   (p.*) end order by fnac,ap1,ap2,p.nombre),
+            first(case when sexo = 'm' then
+                   (p.*) end order by fnac,ap1,ap2,p.nombre))::parejaper
+         else
+           (first(case when sexo = 'f' then
+                    (p.*) end order by fnac,ap1,ap2,p.nombre),
+            last(case when sexo = 'm' then
+                    (p.*) end order by fnac,ap1,ap2,p.nombre))::parejaper end as omg
+  from asentamiento a
+       join domicilio d using (idasentamiento)
+       join persona p using (iddomicilio)
+  group by 1)
+select idm,
+       (r).a.*,
+       (r).b.*
+from omfg as omg(idm,r);
+
+
+/* Creando una función que nos dice los años correspondientes
+ a una fecha de nacimiento */
+create or replace function años(fnac date) returns int immutable as $$
+select extract(year from age(now(),fnac))::int;
+$$ language sql;
+
+/* Mejorando el desempeño de nuestras consultas con Índices */
+
+/* Cuántas personas de la bd tienen 33 años */
+select count(*) from persona where años(fnac) = 33;
+-- PostgreSQL se tarda 7188.580ms en generar la respuesta.
+
+/* Si implementamos un índice sobre el número de años de cada 
+   quien, podemos mejorar el desempeño...
+   ¡CUIDADO! habría que actualizar el índice cada año para 
+             los datos siempre fueran consistentes.*/
+create index actualizamecadaaño on persona (años(fnac));
+--Tras crear el índice, la consulta sólo toma 99.476ms
+
+
+
+
+
+
+
+
+
+
+--El tipo de retorno debe coincidir con el estado. Primero hacemos la función que nos va a contar. Cuenta los vacíos. 
+create or replace function mc_agg(estado bigint, algo anyelement) returns bigint as $$
+	select estado + 1;
+	$$ language sql;
+
+
+--STRICT: Al momento. Hya dos tipos de evaluación :Lazy f(expr) y Eayer f(x)=1+x. Cuando declaramos la función como STRICT es que los parámetros que tiene NULL en algún
+lado los ignore en la implementación de firs.
+create aggregate micount(algo anyelement)(
+sfunc = mc_aag,
+stype = bigint,
+initcond=0
+)
+
+
+--Para borrar
+drop aggregate micount(anyelement);
+
+--Como no dijimos el STRICT se le queda el primer valor que es NULL. 
+create or replace function first_agg(anyelement, anyelement) returns anyelement immutable strict as $$
+select $1;
+$$ language sql;
+
+create aggregate first(anyelement)(
+	sfunct= first_agg,
+	stype=anyelement)
+    
+create or replace function last_agg(anyelement,anyelement) returns anyelement immutable strict as $$
+	select $2;
+$$ language sql;
+***Faltan líneas
+
+
+
+EJERCICIO
+/*Hacer un reporte que tenga los datos de la tabla persona para dos personas A y B
+de la siguiente manera: En cada municipio Si hay más hombres que mujeres poner a la mujer más joven y al hombre más viejo
+en otro caso a la mujer mas vieja y el hombre más joven.
+Resolver empates por apellidos alfabéticamente*/
+
+--Borrador sin funciones de agregación personalizada. 
+
+/*
+1. CTE para determinar en qué municipios hay más hombres que mujeres.
+2. CTE que dé para cada municipio las edades mínimas y máximas de hombres y mujeres .
+3. Hacer las 4 CTE para hombres y mujeres más jóvenes y viejos de cada municipio.
+4. Pegar todo según las condiciones requeridas
+*/
+
+with hmhqm as (select idmunicipio, count(case when sexo='m' then idpersona else null end)
+				   >count(case when sexo='f' then idpersona else null end)  --Me va mandar Verdadero o Falso	
+		from asentamiento a using (idmunicipio)
+			join domicilio d using (idasentamiento)
+			join persona p using (iddomicilio)
+		group by 1),
+	edades as (select idmunicipio,
+			min(case when sexo='f' then (age('2018-02-24'::date,fnac) end) as eminm, ---Edad mínima de las mujeres. El now() nos regresa hasta milisegundos. 
+			min(case when sexo='m' then (age('2018-02-24'::date,fnac) end) as eminh,
+			max(case when sexo='f' then (age('2018-02-24'::date,fnac) end) as emaxm,
+			max(case when sexo='m' then (age('2018-02-24'::date,fnac) end) as emaxh,
+		   from asentamiento a
+			join domicilio d using (idasentamiento)
+			join persona p using (iddomicilio)
+		 group by idmunicipio),	
+	mmjm as (select distinct on (idmunicipio) idmunicipio, ---Distinct on es como un group by pero más agresivo. Y tiene que estar en el group by.
+			p.*
+		 from persona p	
+			join domicilio d using (iddomicilio)
+			join asentamiento a using (idasentamiento)
+			join edades e on (a.idmunicipio = e.idmunicipio and age('2018-02-24'::date,fnac)=eminm)
+		where sexo='f'
+	order by ap1,ap2,nombre)
+-----.... y así 4 veces...
+
+
+CON UNA FUNCIÓN
+create view munipersona as
+select nu
+create or replace function personasmas(sexo char(1),edad interval) returns setof
+
+	
+
+
+--Falso es el mínimo. 
+Procedimientos almancenados que devuelven una tabla.
+
+
+
+***
+
+
+
+
+CON UNA FUNCIÓN DE AGREGACIÓN
+select idmunicipio
+	sexo,
+	first(idpersona order by fnac,ap1,ap2,nombre) pmv,
+	last(idpersona order by fnac,ap1,ap2,nombre) pmj
+from asentamiento a
+     join domicilio d using (idasentamiento)
+     join persona p using (iddomicilio)
+group by 1,2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	

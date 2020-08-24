@@ -1,0 +1,328 @@
+FUNCIONES
+/* Ejemplo
+Mostrar nombre de estado, domicilios habitados y domicilios vacíos Toma I, versión con explicit join.
+*/
+with habitados as (select d.*,true as habit
+                 from persona p 
+                      join domicilio d using (iddomicilio)),
+    vacios as (select *
+                from domicilio
+                 except
+                 select iddomicilio,callenum,idasentamiento from habitados),
+      todos as (select * from habitados union select *,false as habit from vacios)
+select e.nombre,e.claveestado,
+       count(case when habit then t.iddomicilio end) as vacios,
+       count(case when not habit then t.iddomicilio end) as habitados
+from estado e
+     join municipio m using (idestado)
+     join asentamiento a using (idmunicipio)
+     join todos t using (idasentamiento)
+group by e.idestado,
+         e.claveestado,
+         e.nombre,
+         e.poblacion;
+
+/* ejemplo de creación de vistas estandar */
+create view personasplus as 
+select *,
+       extract(year from age(now(),fnac)) as edad,
+       ap1 || coalesce(' ' || ap2 ,'') || ' ' || nombre
+from persona;
+
+/* Eliminando la vista */
+drop view personasplus;
+
+/* Creando la misma vista, pero materializada */
+create materialized view personasplus as 
+select *,
+       extract(year from age(now(),fnac)) as edad,
+       ap1 || coalesce(' ' || ap2 ,'') || ' ' || nombre
+from persona;
+
+/* Refrescando vistas materializadas */
+refresh materialized view personasplus;
+
+/* Función que regresa un valor aleatorio entre a y b*/
+create or replace function aleatorio(a bigint, b bigint) returns bigint as $$
+	select floor(random()*(b - a))::bigint+a;
+$$ language sql;
+
+/* Hacer una consulta que permita verificar que todos 
+los id de persona son consecutivos*/
+select count(*) = max(iddpersona) - min(idpersona)
+from persona;
+
+
+/* Chuleeando randper()*/
+--Toma I
+create or replace function randper() returns bigint as $$
+  select aleatorio(min(idpersona),max(idpersona)) from persona;
+$$ language sql;
+
+--Toma II
+create or replace function randperfast() returns bigint as $$
+declare
+ v_id  bigint;
+begin
+  loop 
+    select aleatorio(min(idpersona),max(idpersona)) into v_id from persona;
+	perform * from persona where idpersona = v_id;
+	if found then return v_id; end if;
+  end loop;
+end;
+$$ language plpgsql;
+
+/* Chuleando randart() */
+create or replace function randart() returns bigint as $$
+declare
+ v_id  bigint;
+begin
+  loop 
+    select aleatorio(min(idarticulo),max(idarticulo)) into v_id from articulo;
+	perform * from articulo where idarticulo = v_id;
+	if found then return v_id; end if;
+  end loop;
+end;
+$$ language plpgsql;
+
+/* Bloque anónimo para verificar el funcionamiento de randart() */
+do $$
+declare
+  ra bigint;
+  v_count int;
+begin
+  v_count := 0;
+  loop
+     ra := randart();
+	 perform * from articulo where idarticulo = ra;
+	 if found then
+	   v_count := v_count + 1;
+	 else 
+	   raise warning 'Ya fue con el id aleatorio % al intento %',ra,v_count;
+	   return;
+	 end if;
+  end loop;
+end;
+$$ language plpgsql;
+
+/* Hacer una función que, dada la calve de un estado, un sexo y un número n,
+nos de los datos de las n personas más jóvenes de ese sexo en ese estado*/
+
+create view  rnj as 
+select null::text as nombre,
+	   null::bigint as iddomicilio,
+	   null::date as fnac,
+	   null::int as edad;
+
+/* Versión SQL */
+create or replace function njovenes(v_clave char(2),v_sexo char(1),v_n bigint) returns setof rnj as $$
+select ap1 || coalesce(' ' || ap2,'') || ' ' || p.nombre,
+       iddomicilio,
+	   fnac,
+	   extract(year from age(now(),fnac))::int as edad
+from persona p
+ 	 join domicilio d using (iddomicilio)
+	 join asentamiento a using (idasentamiento)
+	 join municipio m using (idmunicipio)
+	 join estado e using (idestado)
+where e.claveestado = v_clave
+	  and sexo = v_sexo
+order by edad 
+limit v_n;
+$$ language sql;
+
+/* Versión PLPGSQL */
+create or replace function njovenes(v_clave char(2),v_sexo char(1),v_n bigint) returns setof rnj as $$
+declare
+  v_rec rnj;
+begin
+for v_rec in select ap1 || coalesce(' ' || ap2,'') || ' ' || p.nombre,
+       iddomicilio,
+	   fnac,
+	   extract(year from age(now(),fnac))::int as edad
+from persona p
+ 	 join domicilio d using (iddomicilio)
+	 join asentamiento a using (idasentamiento)
+	 join municipio m using (idmunicipio)
+	 join estado e using (idestado)
+where e.claveestado = v_clave
+	  and sexo = v_sexo
+order by edad 
+limit v_n loop
+    v_rec.iddomicilio := null
+ return next v_rec;
+end loop;
+end;
+$$ language plpgsql;
+
+/* Agregando columnas a artspedido y pedido*/
+alter table pedido add column costototal float add column totalarts int;
+alter table artspedido add column costounitario float;
+
+/* Ponerle como costounitario a cada artspedido el 
+costo respectivo del articuloo*/
+update artspedido r set costounitario = precio
+from articulo a
+where r.idarticulo = a.idarticulo;
+
+/* definir un trigger que, tras cada
+actualización en artspeido, actualice las 
+columnas correspondientes de pedido */
+create trigger updPedido
+after insert or update or delete
+on artspedido
+for each statement
+execute procedure actPbBatch();
+-- Tooma I, alcance statement
+create or replace function  actPbBatch() returns trigger as $$
+declare
+begin
+  with cuentas as (select idpedido, sum(cantidad) ta,sum(cantidad*costounitario) ct
+				   from artspedido
+				   group by idpedido)
+  update pedido p set costototal = ct, totalarts = ta
+  from cuentas c
+  where p.idpedido = c.idpedido
+        and (p.costototal is distinct from c.ct or c.ta is distinct from p.totalarts);
+  raise info 'Ya me ejecuté ^_^';
+  return null;
+  end;
+$$ language plpgsql;
+-- Tooma II, alcance row
+create or replace function  actPbRow() returns trigger as $$
+declare
+ v_nuevosdatos record;
+begin
+  if tg_op = 'UPDATE' or tg_op = 'INSERT' then
+    select sum(cantidad) ta,sum(cantidad*costounitario) ct into v_nuevosdatos from artspedido where idpedido = new.idpedido;
+	update pedido set costototal = coalesce(v_nuevosdatos.ct,0), totalarts = coalesce(v_nuevosdatos.ta,0) where idpedido = new.idpedido;
+	raise info 'Ya me ejecuté ^_^';
+	return new;
+  else
+    select sum(cantidad) ta,sum(cantidad*costounitario) ct into v_nuevosdatos from artspedido where idpedido = old.idpedido;
+	update pedido set costototal = coalesce(v_nuevosdatos.ct,0), totalarts = coalesce(v_nuevosdatos.ta,0) where idpedido = old.idpedido;
+	raise info 'Ya me ejecuté ^_^';
+	return old;
+  end if;
+  end;
+$$ language plpgsql;
+create trigger updPedido
+after insert or update or delete
+on  artspedido
+for each row
+execute procedure actPbRow();
+
+
+
+
+
+
+
+
+
+
+
+
+
+---Función que regresa un valor alteatorio entre a y b
+create or replace function aleatorio(a bigint, b bingint) returns bigint as $$
+	select floor(random()*(b-a))::bigint+a
+$$ lenguaje sql;
+
+
+/*Hacer una consulta que permita verificar que todos los id de persona son consecutivos*/
+
+
+--Chueando randper()
+--Create or replace function randper() returns bigint as $$
+	select aleatorio(min(idpersona),max(idpersona)) from persona;
+$$ lenguaje sql
+
+
+--Ahora haremos que el código truene cuando ya haya encontrado el id del aleatorio.
+create or replace function randerfast()
+
+
+
+/*Chuleando randart()*/
+--El random lo hace para cada tupla en la cual a cada una se le calcula un random diferente; por lo que me pueden salir varias veces valores. 
+create or replace function randart() returns bigint as $$
+declare 
+
+
+--Aquí lo que buscamos es que el aleatorio se encuentre en nuestra base de datos, para eso utilizamos el leguaje plpgsql; metiéndolo a un ciclo
+do $$
+declare
+	ra bigint;
+	v_count int;
+begin
+	c_count:=0;--Asignación
+	loop		
+	
+	end loop;
+end;
+$$ lenguaje plpsql;
+******Falta código, revisar.
+
+
+
+
+/*Hacer una función que, dada la clave de un estado un sexo y un número nos de los datos de las n personas más jóvenes de ese sexo en ese estado*/
+select p.*
+from persona p
+	join domicilio d using (iddomicilio)
+	join asentamiento a using (idasentamiento)
+	join municipio m using (idmunicipio)
+	join estado e using (idestado)
+where e.claveestado = v_clave
+	and asexo=v_sexo
+order by fnac desc
+limi v_n;
+
+--Ahora creamos la funcicón
+--Reutrn setoff conjunto de objetos que sean como la tabla persona, sino tenemos un comparativo, se crea una ventana con el tipo que nosotros deseamos.
+create view rnj as
+select null::text as nombre,
+	null::bigint as iddomicilio,
+	null::date as fnac,
+	null::int as edad;
+
+
+create or replace function njovenes(v_clave char(2),v_sexo char(1),v_n bigint) returns setof rnj as $$  --Mandando llamar la vista
+select ap1||coalesce(' '|| ap2,'')||' '|| p.nombre,
+	iddomicilio,	
+	fnac,
+	extract(year from age(now(),fnac))::int as edad,
+
+select p.*
+from persona p
+	join domicilio d using (iddomicilio)
+	join asentamiento a using (idasentamiento)
+	join municipio m using (idmunicipio)
+	join estado e using (idestado)
+where e.claveestado=v_clave
+	and asexo=v_sexo
+order by fnac desc
+limit v_n;
+$$ language sql;
+
+
+
+
+
+/*Matar una función82
+drop function njovenes(char(2),char(1)
+
+
+
+
+
+
+
+
+
+
+
+
+
+

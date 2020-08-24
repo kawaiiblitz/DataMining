@@ -1,0 +1,59 @@
+INSERCIONES
+
+begin;
+insert into articulo (Descripicón,precio) values ('Perros',20);
+commit;
+*Fue negado porque no estabamos mencionando el id:fábrica el cual pertenece a esta tabla y por consistencia no puede ser NO NULL. Se agrega entonces un número para
+fábrica, pero al no existir se prefiere que se inserte también en la fábrica. Hubo porrblemass porque también hace referencia al estado.
+
+Ej.1
+insert into estado (Claveestado, nombre, poblacion) values ('DF','Ciudad de México',123132);
+commit **Para guardar el resultado.
+
+TRUNCATE **Para eliminar tal cual pero si hay dependencias se usa el cascade
+
+Ej.2
+begin;
+insert into empresa (idempresa,rfc,rasoc,nombrecom,giro,idcliente) values (201,'JUMM920529S67','HM','HM','BELLEZA',2);
+insert into fabrica (idfabrica, totalarts,idempresA) values (700,6000,201);
+insert into articulo (idarticulo,descripcion,precio,idfabrica) values (1030,'Pan',25,500),(3,'Zapatos',2500,500),(8,'Labial',50,700),(8,'Brocha',400,700);
+commit;
+
+
+TRANSACCIONES: Se reserva la información porque está siendo utilizada en una transacción por ejemplo se le cambió el precio a los artículos.
+begin;
+*<--- Indica que estoy dento de la transacción
+rollback **Para ir atrás en todas las nuevas transacciones que estoy realizando. 
+
+SELECT
+Se pueden hacer selecciones de constantes pero no de columnas que no estén referidas a una tabla en particular. El resultado de cualquier selección es una tabla. 
+
+TABLA . COLUMNA
+
+SELECT a in IN (a,b,c);
+T **De true
+
+SELECT EXTRACT(YEAR( from...))
+
+COALASCE ***
+
+JOIN: Arrejunte 
+Select m.nombre from municipio as m, estado as w where (m.idestado = e.idestado)  and e.nombre='México';
+							Condición de "arrejunte"
+
+Esto es mejor que haber realizado una subconsulta.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

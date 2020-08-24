@@ -1,0 +1,314 @@
+MÁS CONSULTAS
+Obtener todos los domicilios que se encuentran en la calle Xochitlan Norte
+
+LIKE 'asbdn%' **Buscan cadenas que cazan este patrón. Si no sabemos como empezar le pondríamos '%a%s%djjs' cualquier cosa que empiece con a, cualquier cosa que sigue con s
+y le sigue una d.
+
+SELECT *
+FROM domicilio
+WHERE callenum LIKE 'Xochitlán Norte%'
+
+
+SELECT *
+FROM domicilio
+WHERE callenum LIKE 'Norte No%'
+	or callenum LIKE 'Norte #%'
+**Para sólo escoger aquellos que el nombre de su calle no se llame con un número.
+
+
+SELECT *
+FROM persona
+where nombre='Mayte' and ap1='Mondragón'
+
+SELECT *
+FROM persona
+where nombre LIKE '% Juan%' 
+	and extract(year from fnac) = 1985
+
+
+//PRODUCTO CARTERSIANO
+ELECT *
+FROM cliente, pedido **El número de columnas es la suma de  ambas tablas y el de los renglones es la mutiplicación. Aquí no son iguales los id´s 
+
+
+//CONDICIÓN DE ARREJUNTE
+SELECT *
+FROM cliente, pedido
+where (cinete.idcliente =  pedido.idcliente)
+**Aquí el número de renglones será el total de pedidos.
+
+//Muestre el estado, asentamiento y municipio para aquellos asentamientos que comiencen con San
+SELECT e.nombre as nEstado,	
+	a.nombre as nAsentamiento,
+	a.nombre as nMun
+from estado e, municipio m, asentamiento a  //En los alias para las tablas no es necesario ponerle "as", excepto si fuese una relación entre paréntesis.
+where (e.idestado = m.idestado
+	and m.idmunicipio = a.idmunicipio)  //Condición de arrejunte
+	and a.nombre like 'San%'	    //Conidición normal
+
+//Nombre de la persona, apellido para las personas que viven en municipios que emipiezan con San **Le falta un pooquito a este código.
+SELECT p.nombre,
+	p.ap1,
+    	p.ap2,
+	e.nombre as nEstado,	
+	a.nombre as nAsentamiento,
+	a.nombre as nMun
+from estado e, municipio m, asentamiento a 
+where (e.idestado = m.idestado
+	and m.idmunicipio = a.idmunicipio
+     and ) 
+	and a.nombre like 'San%'
+    
+
+//Aquellos que tengan apellido paterno nulo.
+select *
+from persona
+where ap2 is NULL
+
+//Quiero la misma condición anterior pero que los apellidos estén concatenados, y tratar el NULO metiendo un CASE.
+SELECT p.ap1 || ' '||
+	(case when p.ap2 is null then '' else ''|| p.ap2 end)
+    || p.nombre as "Nombre",
+	e.nombre as nEstado,	
+	a.nombre as nAsentamiento,
+	a.nombre as nMun
+from estado e, 
+	asentamiento a, 
+	municipio m,
+    domicilio d,
+    persona p
+where (e.idestado=m.idestado)
+	and m.idmunicipio = a.idmunicipio
+    and a.idasentamiento=d.idasentamiento
+    and p.iddomicilio = d.iddomicilio
+    and a.nombre like 'San%'
+
+//Que antepongan el título como Sr. Si fnac no se repite en otras tablas no es necesario especificarlo.
+SELECT  CASE    when p.sexo='m' and extract(year from age(now(),fnac))<=18 then 'Srito.'
+		when p.sexo='f' and extract(year from age(now(),fnac))<=45 then 'Srita.'
+		when p.sexo='m' and extract(year from age(now(),fnac))>18 then 'Sr.'
+		when p.sexo='f' and extract(year from age(now(),fnac))>45 then 'Sra.'
+	end as "Título",					
+
+
+//Las 10 direcciones que se repiten en más asentamiento
+SELECT distinct callenum
+from domicilio
+order by 1
+
+//Esta es otra manera sin utilizar distinct
+SELECT callenum
+from domicilio
+group by callenum
+order by 1
+
+//La calle y número más repetido. Ordenarlo de mayor a menor.
+SELECT callenum, count(*)
+from domicilio
+group by callenum
+order by count(*) desc
+
+//Ahora los que se repiten 44 veces.
+SELECT callenum, count(*)
+from domicilio
+group by callenum
+having count(*)=44
+order by count(*) desc
+
+//Quiero el top 10 de las que se repiten más
+SELECT callenum, count(*)
+from domicilio
+group by callenum
+--having count(*)=44
+order by count(*) desc
+limit 10
+
+//Calles y números que se repiten en más estados.
+SELECT callenum, count(distinct e.idestado)
+from domicilio d, asentamiento a, municipio m, estado e
+where (d.idasentamiento=a.idasentamiento
+      	and a.idmunicipio = m.idmunicipio
+      	and m.idestado= e.idestado)
+group by callenum
+--having count(*)=44
+order by count(distinct e.idestado) desc
+limit 10
+
+
+
+//Queremos aquellos donde no viva nadie
+//Podemos utilizar la DIFERENCIA conjuntista. Obtiene todos domicilio que está en 1FN y le eliminamos aquellos que si tienen domicilio. 
+select * from domicilio
+except
+select d.*
+from persona p, domicilio d
+where (p.iddomicilio= d.iddomicilio)
+
+
+
+//10 estados más abandonados con RELACIÓN OBJETIVO.
+select e.*, count(*) as vacios
+from (select * from domicilio --Sacar los domicilio vacíos y arrejuntarle
+     except
+     select d.*
+     from persona p, domicilio d
+     where (p.iddomicilio= d.iddomicilio)) as vacios,
+     asentamiento a, municipio m, estado e
+ where (Vacios.idasentamiento=a.idasentamiento
+       and a.idmunicipio=m.idmunicipio
+       and m.idestado=e.idestado)
+group by e.idestado,
+		e.claveestado,
+        e.nombre
+order by count(*) desc
+limit 10
+
+
+
+
+COMMON TABLE EXPRESIONS (CTE): Esto es para ordenar nuestro código y sea más amigable ante los usuarios. 
+with habitados as (select d.*
+                     from persona p, domicilio d
+                     where (p.iddomicilio= d.iddomicilio)),
+      vacios as (select * from domicilio
+                except
+                select * from habitados)
+
+select e.*, count(*) as vacios
+from vacios, asentamiento a, municipio m, estado e
+ where (vacios.idasentamiento=a.idasentamiento
+       and a.idmunicipio=m.idmunicipio
+       and m.idestado=e.idestado)
+group by e.idestado,
+		e.claveestado,
+        e.nombre
+order by count(*) desc
+limit 10
+
+
+
+//Tabla con estado, número de domicilios vacíos y número de domicilios habitados en este mismo estado.
+with habitados as (select d.*, true as habitado  --Estamos particionando la tabla de domicilio añadiend una tabla booleana
+                     from persona p, domicilio d
+                     where (p.iddomicilio= d.iddomicilio)),
+      vacios as (select *,false as habitado from domicilio
+                except
+                select * from habitados),
+       todos as (select * from habitados union select *  from vacios)
+
+select e.nombre,
+	count( case when not habitado then todos.iddomicilio end) as vacios, ---Habitado es booleano y esto se necesita para el case.
+    count(case when habitado then todos.iddomicilio end) as habitados
+from todos, asentamiento a, municipio m, estado e
+ where (todos.idasentamiento=a.idasentamiento
+       and a.idmunicipio=m.idmunicipio
+       and m.idestado=e.idestado)
+group by e.idestado,
+		e.claveestado,
+        e.nombre
+order by 1
+
+
+
+select callenum,
+	count(distinct e.idestado) as cuantos,
+    string_agg(distinct e.claveestado,',' order by e.claveestado) as estados
+from domicilio d, asentamiento a, municipio m, estado e
+where (d.idasentamiento=a.idasentamiento
+      and a.idmunicipio= m.idmunicipio
+      and m.idestado=e.idestado)
+group by callenum
+order by count(distinct e.idestado) desc
+limit 10
+
+'Oriente 116 Manzana 97 Lote 90','26','AS,BS,CC,CH,CL,CM,CS,DF,DG,GT,HG,JC,MC,MN,NL,NT,OC,PL,QT,SL,SP,SR,TC,TS,VZ,ZS'
+'Calle 8 # 259 X 5 y 7','26','BC,BS,CH,CL,CM,CS,DF,DG,GR,GT,HG,JC,MC,MN,MS,NL,NT,OC,QR,SP,SR,TC,TL,TS,VZ,YN'
+'Hacienda de la Huerta No 49','25','AS,BC,CC,CH,CM,CS,DF,DG,GT,HG,JC,MC,MN,MS,NT,OC,PL,SP,SR,TC,TL,TS,VZ,YN,ZS'
+'Cda Amado Nervo # 505','25','BS,CC,CH,CM,CS,DG,GR,GT,HG,JC,MC,MN,NL,NT,OC,PL,QR,QT,SL,SR,TC,TL,TS,VZ,YN'
+'Dr. Atl 338 Int 303','25','AS,BC,CC,CM,CS,DF,DG,GR,GT,HG,JC,MC,MN,MS,NL,OC,PL,QR,QT,SL,SP,TL,TS,VZ,ZS'
+'Grecia 040','25','AS,BC,BS,CC,CH,CS,DF,DG,GR,GT,HG,MC,MN,MS,NL,NT,OC,PL,QR,QT,SR,TC,TS,VZ,YN'
+'Ayuhualco 12','25','AS,CH,CM,CS,DF,DG,GR,GT,HG,JC,MC,MN,MS,NL,NT,PL,QR,SL,SP,SR,TC,TL,TS,VZ,ZS'
+'Carlos Duplan Maldonado No 131','25','AS,BS,CH,CM,CS,DG,GR,GT,HG,JC,MC,MN,MS,NT,OC,PL,QT,SL,SP,SR,TC,TL,TS,VZ,YN'
+'Av 3 Unidad Tlalpan Edif 3-B Depto 406','25','BC,BS,CH,CL,CM,CS,DF,DG,GR,GT,HG,JC,MC,MN,MS,OC,PL,QT,SL,SP,SR,TL,TS,YN,ZS'
+'Cerrada 5 de Sur 52 A No. 37','25','CH,CM,CS,DF,DG,GR,GT,HG,JC,MC,MN,MS,NL,NT,OC,QR,QT,SL,SP,SR,TL,TS,VZ,YN,ZS'
+
+
+DISTINCT ON
+select distinct on (nombre,ap1) ap1, ap2, nombre
+from persona
+where nombre='Laura'
+order by nombre, ap1, ap2 --Primero ordena y después 
+
+
+//Mostrar nombre del estado junto con el nombre del municipio con más habitantes de ese estado
+with hm as (select e.nombre as estado,
+		m.nombre as municipio,
+		count(*) as habs
+	from estado e,
+municipio m,
+asentamiento a,
+domicilio d,
+persona p
+where (e.idestado=m.idestado
+	and a.idmunicipio=m.idmunicipio
+	and d.idasentamiento=a.idasentamiento
+	and p.iddomicilio=d.iddomicilio
+group bye 1,2
+order by e.nombre, count(*) desc)
+select distinct on (estado) hm.estado,
+municipio,
+habs
+from hm
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
