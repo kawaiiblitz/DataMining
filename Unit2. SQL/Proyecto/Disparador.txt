@@ -1,0 +1,34 @@
+DISPARADOR
+
+/*Definit un trigger que, tras cada actualización en artspedido, actualice las columnas correspondientes de pedido.
+--Costo total y número total de artículos.
+--Consulta para un pedido en particular el costo total y número de pedidos. Bajo cualquier actualización la tabla no va a sufrir daños.
+
+*******Faltan partes del código.
+--IS DISTINCT FROM operador de diferencia pero si jalan los nulos.
+--RAISE INFO es para notificarnos que algo está sucediendo.
+--Nuevos datos al ser record es un registro no una variable. 
+
+/* Ponerle como costo unitario a cada arts pedido el costo respectivo del artículo*/
+--Se hace el producto cartesiano de artspedido con artículo bajo una restricción y sólo se actuliza los que cumplen con ella.
+update artspedido r set costounitario=precio
+from articulo a
+where r.idarticulo=a.idarticulo;
+	
+
+
+
+create trigger updPedido
+after insert or update or delate
+on tabe artspedido
+for each statement
+execute procedure actPbBatch();
+
+create or replace function actPbBatch() returns trigger as $$--No puedo poner parámetros en una función disparador
+declare
+begin
+	update pedido set costototal=??, totalarts=??
+
+end;
+
+$$language plpsql;

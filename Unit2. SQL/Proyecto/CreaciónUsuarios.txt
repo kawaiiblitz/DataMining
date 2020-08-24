@@ -1,0 +1,9 @@
+Crear los roles de super usuario.
+create user foobar;
+-Le dejamos la opción de autocommit.
+
+Quitarle privilegios.
+GRANT -Para ponerle privilegios
+
+revoke select on articulo from foobar; **Quitarle los privilegios de selección al usuario foobar
+ 	 	

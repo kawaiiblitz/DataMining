@@ -1,0 +1,2 @@
+ÍNDICE
+índice sobre expresiones inmutables, sobre regitros, parejas de registros. 

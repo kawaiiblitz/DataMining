@@ -1,0 +1,63 @@
+JOIN
+
+El Join natural o INNER JOIN o FULL JOIN
+LEFT JOIN y RIGHT JOIN son los que no tienen pareja ya sea por la derecha o por la izquierda; OUTER JOIN son los que no tienen ambos.
+
+//Muestre el estado, asentamiento y municipio para aquellos asentamientos que comiencen con San
+//No me salió :(
+
+select e.nombre, m.nombre,a.nombre
+from estado e, municipio m, asentamiento a
+	join municipio m on (m.idestado=e.idestado) --- o m using (idestado)
+    join asentamiento using (idmunicipio)
+where a.nombre like'San%'
+
+
+//Quiero la misma condición anterior pero que los apellidos estén concatenados, y tratar el NULO metiendo un CASE.
+//Me faltó
+SELECT p.ap1 || ' '||
+	(case when p.ap2 is null then '' else ''|| p.ap2 end)
+    ||''|| p.nombre as "Nombre",
+	e.nombre as nEstado,	
+	a.nombre as nAsentamiento,
+	a.nombre as nMun
+from estado e, 
+	join municipio m using (idestado)
+	....
+	....
+	....
+where (e.idestado=m.idestado)
+	and m.idmunicipio = a.idmunicipio
+    and a.idasentamiento=d.idasentamiento
+    and p.iddomicilio = d.iddomicilio
+    and a.nombre like 'San%'
+
+
+
+//Domicilios que no tienen asociado ningún habitante. Como en el anterior JOIN implícito
+
+select e.nombre as estado,
+	count(distinct case when p.idpersona is not null then d.iddomicilio else null end) as habitados,
+    count(distinct case when p.idpersona is null then d.iddomicilio else null end) as vacios,
+
+from domicilio d
+	join asentamient a using (idasentamiento)
+    join municipio m using (idmunicipio)
+    join estado e using (idestado)
+	left join persona p using (iddomicilio)
+    group by e.nombre
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
